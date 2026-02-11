@@ -1,5 +1,4 @@
 import json
-import urllib.parse
 import urllib.request
 
 import folium
@@ -146,12 +145,8 @@ with st.sidebar:
             st.session_state["friends"] = []
             st.rerun()
 
-        # Share link
-        st.divider()
-        friends_encoded = urllib.parse.quote(json.dumps(st.session_state["friends"]))
+        # Keep URL in sync for sharing
         st.query_params["friends"] = json.dumps(st.session_state["friends"])
-        share_url = f"?friends={friends_encoded}"
-        st.text_input("Share link", value=share_url, disabled=True)
     else:
         if "friends" in st.query_params:
             del st.query_params["friends"]
