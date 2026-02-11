@@ -15,6 +15,10 @@ st.set_page_config(
 
 PARIS_CENTER = [48.8566, 2.3522]
 DEFAULT_ZOOM = 11
+MARKER_COLORS = [
+    "#4285F4", "#EA4335", "#FBBC05", "#34A853",
+    "#FF6D01", "#46BDC6", "#7B1FA2", "#C2185B",
+]
 
 
 @st.cache_data(show_spinner=False)
@@ -27,6 +31,19 @@ def geocode_address(address: str) -> tuple[float, float] | None:
         return None
     except (GeocoderTimedOut, GeocoderUnavailable, Exception):
         return None
+
+
+
+def _make_marker_icon(letter: str, color: str) -> folium.DivIcon:
+    html = (
+        f'<div style="background:{color}; width:30px; height:30px; '
+        f'border-radius:50%; display:flex; align-items:center; '
+        f'justify-content:center; color:white; font-weight:bold; '
+        f'font-size:14px; border:2px solid white; '
+        f'box-shadow:0 1px 3px rgba(0,0,0,0.3);">'
+        f'{letter}</div>'
+    )
+    return folium.DivIcon(html=html, icon_size=(30, 30), icon_anchor=(15, 15))
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +72,7 @@ if "friends" not in st.session_state:
     st.session_state["friends"] = url_friends if url_friends else []
 
 # ---------------------------------------------------------------------------
-# Sidebar – input form + friends list
+# Sidebar – input + friends list
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
@@ -81,7 +98,12 @@ with st.sidebar:
         for i, friend in enumerate(st.session_state["friends"]):
             col1, col2 = st.columns([4, 1])
             with col1:
-                st.markdown(f"**{friend['name']}**  \n{friend['address']}")
+                color = MARKER_COLORS[i % len(MARKER_COLORS)]
+                st.markdown(
+                    f'<span style="color:{color}; font-size:18px;">\u25cf</span> '
+                    f"**{friend['name']}**  \n{friend['address']}",
+                    unsafe_allow_html=True,
+                )
             with col2:
                 if st.button("\u2715", key=f"remove_{i}", help="Remove"):
                     st.session_state["friends"].pop(i)
@@ -125,12 +147,14 @@ if len(geocoded) >= 2:
 m = folium.Map(location=PARIS_CENTER, zoom_start=DEFAULT_ZOOM)
 
 if geocoded:
-    for f in geocoded:
+    for idx, f in enumerate(geocoded):
+        color = MARKER_COLORS[idx % len(MARKER_COLORS)]
+        letter = f["name"][0].upper() if f["name"] else "?"
         folium.Marker(
             location=[f["lat"], f["lon"]],
             popup=f"<b>{f['name']}</b><br>{f['address']}",
             tooltip=f["name"],
-            icon=folium.Icon(color="blue", icon="user", prefix="fa"),
+            icon=_make_marker_icon(letter, color),
         ).add_to(m)
 
     if barycentre:
