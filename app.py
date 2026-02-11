@@ -1,5 +1,6 @@
 import json
 import urllib.parse
+import urllib.request
 
 import folium
 import streamlit as st
@@ -32,6 +33,37 @@ def geocode_address(address: str) -> tuple[float, float] | None:
     except (GeocoderTimedOut, GeocoderUnavailable, Exception):
         return None
 
+
+@st.cache_data(show_spinner=False)
+def reverse_geocode(lat: float, lon: float) -> str | None:
+    try:
+        geolocator = Nominatim(user_agent="barycentre-streamlit-app")
+        location = geolocator.reverse((lat, lon), timeout=10)
+        if location:
+            return location.address
+        return None
+    except (GeocoderTimedOut, GeocoderUnavailable, Exception):
+        return None
+
+
+@st.cache_data(show_spinner=False)
+def get_route_info(lat1: float, lon1: float, lat2: float, lon2: float) -> tuple[float, float] | None:
+    """Get driving distance (km) and duration (min) via OSRM."""
+    try:
+        url = (
+            f"https://router.project-osrm.org/route/v1/driving/"
+            f"{lon1},{lat1};{lon2},{lat2}?overview=false"
+        )
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = json.loads(resp.read())
+        if data.get("code") == "Ok" and data.get("routes"):
+            route = data["routes"][0]
+            distance_km = route["distance"] / 1000
+            duration_min = route["duration"] / 60
+            return (round(distance_km, 1), round(duration_min))
+        return None
+    except Exception:
+        return None
 
 
 def _make_marker_icon(letter: str, color: str) -> folium.DivIcon:
@@ -109,6 +141,11 @@ with st.sidebar:
                     st.session_state["friends"].pop(i)
                     st.rerun()
 
+        # Clear all
+        if st.button("Clear all", use_container_width=True):
+            st.session_state["friends"] = []
+            st.rerun()
+
         # Share link
         st.divider()
         friends_encoded = urllib.parse.quote(json.dumps(st.session_state["friends"]))
@@ -135,14 +172,29 @@ for friend in st.session_state["friends"]:
         errors.append(friend)
 
 barycentre = None
+barycentre_address = None
 if len(geocoded) >= 2:
     avg_lat = sum(f["lat"] for f in geocoded) / len(geocoded)
     avg_lon = sum(f["lon"] for f in geocoded) / len(geocoded)
     barycentre = (avg_lat, avg_lon)
+    barycentre_address = reverse_geocode(avg_lat, avg_lon)
 
 # ---------------------------------------------------------------------------
-# Map
+# Title + map
 # ---------------------------------------------------------------------------
+
+st.markdown(
+    '<h1 style="text-align:center; margin-bottom:0;">Barycentre</h1>'
+    '<p style="text-align:center; color:gray; margin-top:0;">'
+    'Pour jouer \u00e0 la coinche avec les potes</p>',
+    unsafe_allow_html=True,
+)
+
+if barycentre_address:
+    st.markdown(
+        f'<p style="text-align:center;">\u2b50 Point de rendez-vous : <b>{barycentre_address}</b></p>',
+        unsafe_allow_html=True,
+    )
 
 m = folium.Map(location=PARIS_CENTER, zoom_start=DEFAULT_ZOOM)
 
@@ -157,10 +209,23 @@ if geocoded:
             icon=_make_marker_icon(letter, color),
         ).add_to(m)
 
+        # Draw line to barycentre
+        if barycentre:
+            folium.PolyLine(
+                locations=[[f["lat"], f["lon"]], [barycentre[0], barycentre[1]]],
+                color=color,
+                weight=2,
+                opacity=0.5,
+                dash_array="8",
+            ).add_to(m)
+
     if barycentre:
+        popup_text = "<b>Barycentre</b><br>The meeting point!"
+        if barycentre_address:
+            popup_text = f"<b>Barycentre</b><br>{barycentre_address}"
         folium.Marker(
             location=[barycentre[0], barycentre[1]],
-            popup="<b>Barycentre</b><br>The meeting point!",
+            popup=popup_text,
             tooltip="Barycentre",
             icon=folium.Icon(color="red", icon="star", prefix="fa"),
         ).add_to(m)
@@ -173,6 +238,21 @@ if geocoded:
     m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]], padding=[50, 50])
 
 st_folium(m, use_container_width=True, height=600, returned_objects=[])
+
+# ---------------------------------------------------------------------------
+# Travel info + errors
+# ---------------------------------------------------------------------------
+
+if barycentre and geocoded:
+    rows = []
+    for idx, f in enumerate(geocoded):
+        route = get_route_info(f["lat"], f["lon"], barycentre[0], barycentre[1])
+        if route:
+            rows.append({"Name": f["name"], "Distance": f"{route[0]} km", "Travel time": f"{route[1]:.0f} min"})
+        else:
+            rows.append({"Name": f["name"], "Distance": "N/A", "Travel time": "N/A"})
+    st.markdown("#### Travel to the meeting point")
+    st.dataframe(rows, use_container_width=True, hide_index=True)
 
 for err in errors:
     st.warning(
